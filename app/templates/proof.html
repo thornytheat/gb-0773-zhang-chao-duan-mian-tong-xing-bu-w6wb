@@ -1,1 +1,5 @@
+{% if proof_block %}
+<div class="grid"><section class="panel"><h2>签发已停用</h2><p class="balance blocked-banner" role="alert"><b>停用范围内不许签发。</b></p><p>{{ proof_block.message }}（{{ proof_block.code }}）。请返回值班复核调整，或等待晚到读数触发重算。</p><p><a class="download secondary" href="{{ url_for('tide_desk.desk', chapter='review', run=key) }}">返回值班复核</a></p></section><section class="panel"><h2>停用范围</h2><ul>{% for block in proof_block.blocks %}{% for item in block.windows %}<li>{{ item.vessel }}：{{ time(item.start) }}–{{ time(item.end) }} · {{ item.seconds }} s · {{ states[item.before] }} → {{ states[item.after] }}</li>{% endfor %}{% endfor %}</ul></section></div>
+{% else %}
 <div class="grid"><section class="panel"><h2>潮窗验签</h2><p class="balance">原件与结果摘要一致</p><p class="hash">{{ seal }}</p><a class="download" href="{{ url_for('api.download', key=key) }}">下载潮窗证据</a></section><section class="panel"><h2>签发清单</h2><ul><li>潮尺、站点、船期原件</li><li>隔离原因与读数来源</li><li>交点、候潮区间及覆盖账</li></ul><p>调度复核 __________________</p></section></div>
+{% endif %}

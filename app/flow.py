@@ -8,11 +8,15 @@ from app.modules.schedule.service import reconcile
 STEPS = ('readings', 'datum', 'crossings', 'windows', 'coverage')
 
 
-def calculate(inputs, stop='coverage'):
+def calculate(inputs, stop='coverage', disabled_stations=None, excluded_lines=None):
     reports = {'readings': intake(inputs)}
     if stop == 'readings':
         return reports
-    reports['datum'] = normalize(reports['readings'])
+    reports['datum'] = normalize(
+        reports['readings'],
+        disabled_stations=disabled_stations,
+        excluded_lines=excluded_lines,
+    )
     if stop == 'datum':
         return reports
     reports['crossings'] = find_crossings(reports['datum'], orders(reports['readings']))

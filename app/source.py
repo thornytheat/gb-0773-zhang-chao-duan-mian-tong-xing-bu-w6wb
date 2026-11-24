@@ -3,12 +3,18 @@ from app.errors import TideError
 from app.modules.intake.contract import HEADERS
 
 
+SAMPLE_ALIASES = {'dirty': 'dirty', 'outage': 'dirty', 'broken': 'dirty', 'review': 'dirty',
+                  '断测场次': 'dirty', '断测': 'dirty',
+                  'clean': 'clean', 'continuous': 'clean', '连续测站': 'clean'}
+
+
 def load_sources(payload):
     if not isinstance(payload, dict):
         raise TideError('BAD_SOURCE', '请选择样例或提交三份潮汐资料')
     if set(payload) == {'sample'}:
-        sample = payload['sample']
-        if sample not in ('dirty', 'clean'):
+        requested = str(payload['sample'])
+        sample = SAMPLE_ALIASES.get(requested, SAMPLE_ALIASES.get(requested.lower()))
+        if sample is None:
             raise TideError('NO_SAMPLE', '找不到样例簿', 404)
         return {name: (SAMPLE_ROOT / sample / f'{name}.csv').read_bytes().decode() for name in HEADERS}
     sources = payload.get('sources')

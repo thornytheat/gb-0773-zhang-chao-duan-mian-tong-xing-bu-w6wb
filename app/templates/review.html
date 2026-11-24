@@ -1,0 +1,197 @@
+<div class="grid review-grid">
+  <section class="panel review-summary">
+    <h2>值班裁决 / 交班复核</h2>
+    <p>交班时可在此确认本次是“只剔坏行”以保住可用潮窗，还是“停用整站”保守处置；所有变化按船期列示。复核簿 <b data-review-id="{{ review.review_id }}">{{ review.review_id[:16] }}</b> · 版本 <b data-review-version>{{ review.version }}</b> · 当前归档 <span class="hash">{{ review.run_id[:16] }}</span></p>
+    {% if review.issuance_blocked %}
+      <p class="balance blocked-banner" role="alert"><b>停用范围内不许签发。</b> 已有整站停用处置覆盖下列船期时段；请等待新读数或新裁决。</p>
+      <ul>
+        {% for block in review.block.blocks %}{% for item in block.windows %}
+          <li>{{ item.vessel }}：{{ time(item.start) }} 至 {{ time(item.end) }}（{{ item.seconds }} s，{{ states[item.before] }} → {{ states[item.after] }}）</li>
+        {% endfor %}{% endfor %}
+      </ul>
+    {% else %}
+      <p class="balance">当前没有生效中的整站停用范围；未被停用影响的潮窗可进入证据签发。</p>
+    {% endif %}
+    <p>
+      {% if review.issuance_blocked %}
+        <button type="button" disabled aria-disabled="true" class="download is-blocked">停用范围禁止签发</button>
+      {% else %}
+        <a class="download" href="{{ url_for('api.download', key=review.run_id) }}">下载当前潮窗证据</a>
+      {% endif %}
+      <a class="download secondary" href="{{ url_for('tide_desk.desk', chapter='proof', run=review.run_id) }}">前往签发页</a>
+    </p>
+  </section>
+
+  {% if review.combined_impact %}
+  <section class="panel combined-impact">
+    <h2>当前处置合并后的船期时段</h2>
+    <div class="scroll">
+      <table class="impact-table">
+        <thead><tr><th>船期</th><th>可行 s</th><th>缺证 s</th><th>变化 / 时段</th></tr></thead>
+        <tbody>
+          {% for vessel, ship in review.combined_impact.ships.items() %}
+          <tr data-vessel="{{ vessel }}">
+            <td>{{ vessel }}</td>
+            <td data-current-open="{{ ship.after_seconds.open }}"><b>{{ ship.after_seconds.open }}</b>（{{ ship.delta_open_s }}）</td>
+            <td data-current-unknown="{{ ship.after_seconds.unknown }}"><b>{{ ship.after_seconds.unknown }}</b>（{{ ship.delta_unknown_s }}）</td>
+            <td>
+              {% for item in ship.changes %}
+                <div class="interval-change" data-before="{{ item.before }}" data-after="{{ item.after }}">{{ time(item.start) }}–{{ time(item.end) }} · {{ item.seconds }}s · {{ states[item.before] or item.before }} → <b>{{ states[item.after] or item.after }}</b></div>
+              {% else %}<span>状态区间无变化</span>{% endfor %}
+              <div class="period-list"><b>可行：</b>{% for item in ship.open_periods %}<span>{{ time(item.start) }}–{{ time(item.end) }} · {{ item.seconds }}s</span>{% else %}<span>无</span>{% endfor %}</div>
+              <div class="period-list"><b>缺证：</b>{% for item in ship.unknown_periods %}<span>{{ time(item.start) }}–{{ time(item.end) }} · {{ item.seconds }}s</span>{% else %}<span>无</span>{% endfor %}</div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="panel late-reading">
+    <h2>晚到读数</h2>
+    <form method="post" action="{{ url_for('tide_desk.review_reading', review_id=review.review_id) }}" class="review-form">
+      <div class="form-row">
+        <label>站号 <input name="station" placeholder="U1"></label>
+        <label>时刻 <input name="observed_at" placeholder="2026-11-23T00:20:00+08:00"></label>
+        <label>读数 <input name="level" placeholder="205"></label>
+        <label>单位 <select name="unit"><option value="cm">cm</option><option value="m">m</option><option value="mm">mm</option></select></label>
+        <label>质量 <select name="quality"><option value="OK">OK</option><option value="BAD">BAD</option></select></label>
+      </div>
+      <label>或粘贴晚到 CSV 行 / 含表头片段<textarea name="csv" rows="3" placeholder="station,observed_at,level,unit,quality&#10;U1,..."></textarea></label>
+      <button type="submit">记录晚到读数并重算范围</button>
+      <small>若新读数改变异常前后夹逼范围，旧处置会作废但仍可在本页历史中查询。</small>
+    </form>
+  </section>
+
+  {% for anomaly in review.anomalies %}
+  <section class="panel anomaly-card" data-anomaly-id="{{ anomaly.id }}" id="anomaly-{{ anomaly.id }}">
+    <h2>{{ anomaly.label }}</h2>
+    <dl class="anomaly-meta">
+      <dt>异常号</dt><dd><code>{{ anomaly.id }}</code></dd>
+      <dt>测站 / 断面</dt><dd>{{ anomaly.station or '—' }} / {{ anomaly.section or '未登记' }}</dd>
+      <dt>观测时刻</dt><dd>{{ time(anomaly.observed_at) if anomaly.observed_at is not none else anomaly.observed_text }}</dd>
+      <dt>影响范围</dt><dd data-scope-hash="{{ anomaly.scope_hash }}">
+        {% if anomaly.scope.scope_start and anomaly.scope.scope_end %}
+          放行时刻 {{ time(anomaly.scope.scope_start) }} 至 {{ time(anomaly.scope.scope_end) }}
+          （证据时刻 {{ time(anomaly.scope.start) }}–{{ time(anomaly.scope.end) }}，{{ anomaly.scope.interval_s or '?' }} s）
+        {% else %}
+          单侧缺证 / 无双侧夹逼；不向曲线外推
+        {% endif %}
+        {% if anomaly.scope.over_gap %}<b class="tag warn">超过 gap_s，按缺证处理</b>{% endif %}
+      </dd>
+    </dl>
+
+    {% if anomaly.active_decision %}
+      <p class="active-ruling" data-active-decision="{{ anomaly.active_decision.decision_id }}">
+        当前确认：<b>{{ '只剔坏行' if anomaly.active_decision.action == 'row_only' else '停用整站' }}</b>
+        · {{ anomaly.active_decision.decision_id[:16] }}
+        {% if anomaly.active_decision.operator %} · {{ anomaly.active_decision.operator }}{% endif %}
+      </p>
+    {% else %}
+      <p class="pending-ruling">尚未确认本轮处置；重复提交同一处置不会新增记录，并发不同处置只有一份生效。</p>
+    {% endif %}
+
+    {% if anomaly.adjudicable %}
+    <form method="post" class="ruling-form" action="{{ url_for('tide_desk.review_decide', review_id=review.review_id) }}">
+      <input type="hidden" name="anomaly_id" value="{{ anomaly.id }}">
+      <input type="hidden" name="version" value="{{ review.version }}">
+      <input type="hidden" name="operator" value="值班员">
+      <button type="submit" name="action" value="row_only" class="row-only" data-decision="row_only">只剔坏行，尽量保住潮窗</button>
+      {% if anomaly.can_disable_station %}
+      <button type="submit" name="action" value="disable_station" class="disable-station" data-decision="disable_station"
+              formnovalidate onclick="return confirm('确认停用 {{ anomaly.station }} 整站？停用影响范围内将不许签发。')">停用整站，范围内不许签发</button>
+      {% endif %}
+    </form>
+    {% endif %}
+
+    {% if 'CONFLICT' in anomaly.codes and anomaly.rows|length > 1 %}
+    <div class="conflict-lines">
+      {% for row in anomaly.rows %}
+      <form method="post" class="inline-form" action="{{ url_for('tide_desk.review_decide', review_id=review.review_id) }}">
+        <input type="hidden" name="anomaly_id" value="{{ anomaly.id }}">
+        <input type="hidden" name="version" value="{{ review.version }}">
+        <input type="hidden" name="action" value="row_only">
+        <input type="hidden" name="line" value="{{ row.line }}">
+        <button type="submit" data-decision="row-only-line-{{ row.line }}">只剔第 {{ row.line }} 行，保留同刻其他读数</button>
+      </form>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if anomaly.preview %}
+      {% for option_name in ['row_only', 'disable_station'] %}
+        {% set impact = anomaly.preview[option_name] %}
+        {% if impact %}
+        <details class="impact-details" {{ 'open' if (anomaly.active_decision and anomaly.active_decision.action == option_name) or (not anomaly.active_decision and option_name == 'row_only') }}>
+          <summary>{{ '只剔坏行' if option_name == 'row_only' else '停用整站（相对只剔坏行的变化）' }} · 各船期因此变化的可行 / 缺证时段</summary>
+          <div class="scroll">
+          <table class="impact-table">
+            <thead><tr><th>船期</th><th>可行 s</th><th>缺证 s</th><th>变化时段</th></tr></thead>
+            <tbody>
+              {% for vessel, ship in impact.ships.items() %}
+              <tr data-vessel="{{ vessel }}">
+                <td>{{ vessel }}</td>
+                <td data-open-before="{{ ship.before_seconds.open }}" data-open-after="{{ ship.after_seconds.open }}">
+                  {{ ship.before_seconds.open }} → <b>{{ ship.after_seconds.open }}</b>
+                  （{{ ship.delta_open_s if ship.delta_open_s.startswith('-') else '+' ~ ship.delta_open_s }}）
+                </td>
+                <td data-unknown-before="{{ ship.before_seconds.unknown }}" data-unknown-after="{{ ship.after_seconds.unknown }}">
+                  {{ ship.before_seconds.unknown }} → <b>{{ ship.after_seconds.unknown }}</b>
+                  （{{ ship.delta_unknown_s if ship.delta_unknown_s.startswith('-') else '+' ~ ship.delta_unknown_s }}）
+                </td>
+                <td>
+                  {% for item in ship.changes %}
+                    <div class="interval-change" data-before="{{ item.before }}" data-after="{{ item.after }}">
+                      {{ time(item.start) }}–{{ time(item.end) }} · {{ item.seconds }} s ·
+                      {{ states[item.before] or item.before }} → <b>{{ states[item.after] or item.after }}</b>
+                    </div>
+                  {% else %}<span>状态区间无变化</span>{% endfor %}
+                  {% if ship.open_periods %}
+                    <div class="period-list"><b>可行：</b>
+                      {% for item in ship.open_periods %}<span>[{{ time(item.start) }}–{{ time(item.end) }} · {{ item.seconds }}s]</span>{% endfor %}
+                    </div>
+                  {% endif %}
+                  {% if ship.unknown_periods %}
+                    <div class="period-list"><b>缺证：</b>
+                      {% for item in ship.unknown_periods %}<span>[{{ time(item.start) }}–{{ time(item.end) }} · {{ item.seconds }}s]</span>{% endfor %}
+                    </div>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          </div>
+        </details>
+        {% endif %}
+      {% endfor %}
+    {% endif %}
+  </section>
+  {% else %}
+  <section class="panel"><h2>没有可复核异常</h2><p>本归档未发现潮尺隔离记录。</p></section>
+  {% endfor %}
+
+  <section class="panel history-panel">
+    <h2>处置留档（含已作废）</h2>
+    <table class="history-table">
+      <thead><tr><th>确认时间</th><th>异常</th><th>处置</th><th>状态</th><th>作废原因 / 时间</th><th>记录号</th></tr></thead>
+      <tbody>
+        {% for item in review.history|reverse %}
+        <tr data-decision-id="{{ item.decision_id }}" data-status="{{ item.status }}" data-state="{{ item.state }}" data-voided="{{ 'true' if item.voided else 'false' }}">
+          <td>{{ item.confirmed_at }}</td>
+          <td><code>{{ item.anomaly_id }}</code></td>
+          <td>{{ '只剔坏行' if item.action == 'row_only' else '停用整站' }}</td>
+          <td class="decision-status">{{ '已确认' if item.status == 'confirmed' else '已作废 / 已失效' }}</td>
+          <td>{% if item.voided %}{{ reason[item.void_reason] or item.void_reason }} · {{ item.voided_at }}{% else %}—{% endif %}</td>
+          <td class="hash">{{ item.decision_id[:16] }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6">尚无处置记录。</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p><a href="{{ url_for('api.review_history', review_id=review.review_id) }}">查看机器可读历史 JSON</a></p>
+  </section>
+</div>

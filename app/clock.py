@@ -8,11 +8,15 @@ STAMP = re.compile(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})\Z'
 
 
 def moment(value):
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return int(value)
     value = value.strip()
-    if not STAMP.fullmatch(value):
-        raise ValueError('须提供带偏移的整秒时间')
-    delta = datetime.fromisoformat(value).astimezone(UTC) - EPOCH
-    return delta.days * 86400 + delta.seconds
+    if STAMP.fullmatch(value):
+        delta = datetime.fromisoformat(value).astimezone(UTC) - EPOCH
+        return delta.days * 86400 + delta.seconds
+    if re.fullmatch(r'\d{1,12}', value):
+        return int(value)
+    raise ValueError('须提供带偏移的整秒时间或 Unix 秒')
 
 
 def depth(value):
